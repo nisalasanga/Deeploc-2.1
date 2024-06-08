@@ -75,6 +75,11 @@ class BaseModel(pl.LightningModule):
         #print(x_pred, x_attns)
         return x_pred, x_pool, x_attns
     
+    def predict_proba(self, embedding, lens, non_mask):
+        x_pred, x_pool, x_attns = self.forward(embedding, lens, non_mask)
+        probabilities = torch.sigmoid(x_pred)
+        return probabilities, x_pool, x_attns
+    
     def attn_reg_loss(self, y_true, y_attn, y_tags, lengths, n):
         loss = 0
         count = 0

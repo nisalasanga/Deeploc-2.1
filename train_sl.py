@@ -85,6 +85,7 @@ if __name__ == "__main__":
 
     print("Using trained models to generate outputs for signal prediction training")
     generate_sl_outputs(model_attrs=model_attrs, datahandler=datahandler)
+    generate_sl_outputs_modified(model_attrs=model_attrs, datahandler=datahandler)
     print("Generated outputs! Can train sorting signal prediction now")
 
 

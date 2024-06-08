@@ -22,12 +22,18 @@ def predict_sl_values(dataloader, model):
     output_dict = {}
     annot_dict = {}
     pool_dict = {}
+
+    probabilities_list = []
+    identifiers = []
+
     with torch.no_grad():
       for i, (toks, lengths, np_mask, targets, targets_seq, labels) in tqdm.tqdm(enumerate(dataloader)):
         with torch.autocast(device_type=device,dtype=dtype):
             y_pred, y_pool, y_attn = model.predict(toks.to(device), lengths.to(device), np_mask.to(device))
         x = torch.sigmoid(y_pred).float().cpu().numpy()
+        probabilities_list.append(x) 
         for j in range(len(labels)):
+            identifiers.append(labels[j])  # Add ACC as the identifier
             if len(labels) == 1:
                 output_dict[labels[j]] = x
                 pool_dict[labels[j]] = y_pool.float().cpu().numpy()
@@ -40,8 +46,43 @@ def predict_sl_values(dataloader, model):
     output_df = pd.DataFrame(output_dict.items(), columns=['ACC', 'preds'])
     annot_df = pd.DataFrame(annot_dict.items(), columns=['ACC', 'pred_annot'])
     pool_df = pd.DataFrame(pool_dict.items(), columns=['ACC', 'embeds'])
-    return output_df.merge(annot_df).merge(pool_df)
+
+    # Concatenate probabilities for all batches
+    all_probabilities = np.concatenate(probabilities_list, axis=0)
     
+    # Convert probabilities to DataFrame
+    probabilities_df = pd.DataFrame(all_probabilities, columns=[f'class_{i}' for i in range(all_probabilities.shape[1])])
+    
+    # Add ACC column
+    probabilities_df['ACC'] = identifiers
+    
+
+    return output_df.merge(annot_df).merge(pool_df), probabilities_df
+
+
+def generate_sl_outputs_modified(
+        model_attrs: ModelAttributes, 
+        datahandler: DataloaderHandler, 
+        inner_i="1Layer"):
+    
+    for outer_i in range(5):
+        print("Generating output for ensemble model", outer_i)
+
+        path = f"{model_attrs.save_path}/{outer_i}_{inner_i}.ckpt"
+        model = model_attrs.class_type.load_from_checkpoint(path).to(device).eval()
+
+        dataloader, data_df = datahandler.get_partition_dataloader(outer_i)
+        data_df_all, probabilities_df = predict_sl_values(dataloader, model)
+
+
+        # Save Data_df to a CSV file
+        data_df_all = pd.DataFrame(data_df_all)
+        data_df_all.to_csv(f'data_df_all{outer_i}.csv', index=False)
+
+        # Save probabilities to a CSV file
+        probabilities_df.to_csv(f'probabilities{outer_i}.csv', index=False)
+
+
 def generate_sl_outputs(
         model_attrs: ModelAttributes, 
         datahandler: DataloaderHandler, 
@@ -57,7 +98,7 @@ def generate_sl_outputs(
         if not os.path.exists(os.path.join(model_attrs.outputs_save_path, f"inner_{outer_i}_{inner_i}.pkl")):
             path = f"{model_attrs.save_path}/{outer_i}_{inner_i}.ckpt"
             model = model_attrs.class_type.load_from_checkpoint(path).to(device).eval()
-            pred_df = predict_sl_values(dataloader, model)
+            pred_df, _ = predict_sl_values(dataloader, model)
             pred_df.to_pickle(os.path.join(model_attrs.outputs_save_path, f"inner_{outer_i}_{inner_i}.pkl"))
         else:
             pred_df = pd.read_pickle(os.path.join(model_attrs.outputs_save_path, f"inner_{outer_i}_{inner_i}.pkl"))
@@ -72,16 +113,19 @@ def generate_sl_outputs(
         
         if not os.path.exists(os.path.join(model_attrs.outputs_save_path, f"{outer_i}_{inner_i}.pkl")):
             dataloader, data_df = datahandler.get_partition_dataloader(outer_i)
-            output_df = predict_sl_values(dataloader, model)
+            output_df, _ = predict_sl_values(dataloader, model)
             output_df.to_pickle(os.path.join(model_attrs.outputs_save_path, f"{outer_i}_{inner_i}.pkl"))
 
     with open(os.path.join(model_attrs.outputs_save_path, f"thresholds_sl_{thresh_type}.pkl"), "wb") as f:
         pickle.dump(threshold_dict, f)
 
+
 def predict_ss_values(X, model):
     X_tensor = torch.tensor(X, device=device).float()
     y_preds = torch.sigmoid(model(X_tensor))
     return y_preds.detach().cpu().numpy()
+
+
 
 def generate_ss_outputs(
         model_attrs: ModelAttributes, 
