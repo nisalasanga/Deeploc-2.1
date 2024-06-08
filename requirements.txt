@@ -13,3 +13,5 @@ pickle5
 h5py
 pandas<2.0.0
 scikit-learn
+scikit-learn
+openpyxl
